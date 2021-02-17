@@ -10,6 +10,9 @@ let package = Package(
         .library(
             name: "TinyLisp",
             targets: ["TinyLisp"]),
+        .executable(
+            name: "tlisp",
+            targets: ["tlisp"]),
     ],
     dependencies: [
         // Dependencies declare other packages that this package depends on.
@@ -24,5 +27,8 @@ let package = Package(
         .testTarget(
             name: "TinyLispTests",
             dependencies: ["TinyLisp"]),
+        .target(
+            name: "tlisp",
+            dependencies: ["TinyLisp"])
     ]
 )
