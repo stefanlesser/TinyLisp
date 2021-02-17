@@ -56,7 +56,7 @@ private func apply(function name: String, with arguments: [Expr], in context: En
 private func eval(_ expression: Expr, in context: inout Environment) -> Expr {
     switch expression {
     case .atom(let symbol):
-        return context[symbol] ?? expression // lookup value or pass back unchanged
+        return context[symbol] ?? expression // lookup value or pass expression back unchanged
     case .list(let list):
         switch (list.first, list.dropFirst()) {
         case (.none, _): // empty list (aka nil)
@@ -66,27 +66,32 @@ private func eval(_ expression: Expr, in context: inout Environment) -> Expr {
             case "quote":
                 return rest.first!
             case "if":
-                switch (rest.first, rest.dropFirst().first, rest.dropFirst().dropFirst().first) {
-                case (let conditionExpr?, let thenExpr?, let elseExpr):
-                    let condition = eval(conditionExpr, in: &context)
-                    if case .list([]) = condition { // condition is false (empty list represents nil)
-                        guard let elseExpr = elseExpr else { return .list([]) }
-                        return eval(elseExpr, in: &context)
-                    } else {
-                        return eval(thenExpr, in: &context)
-                    }
-                default:
+                guard
+                    let conditionExpr = rest.first,
+                    let thenExpr = rest.dropFirst().first
+                else {
                     fatalError("'if': argument mismatch")
                 }
+                let elseExpr = rest.dropFirst(2).first
+
+                let condition = eval(conditionExpr, in: &context)
+                if case .list([]) = condition { // condition is false (empty list represents nil)
+                    guard let elseExpr = elseExpr else { return .list([]) } // else is optional
+                    return eval(elseExpr, in: &context)
+                } else {
+                    return eval(thenExpr, in: &context)
+                }
             case "label":
-                switch (rest.first, rest.dropFirst().first) {
-                case (.atom(let name), let valueExpression?):
-                    let value = eval(valueExpression, in: &context)
-                    context[name] = value
-                    return value
-                default:
+                guard
+                    case .atom(let name) = rest.first,
+                    let valueExpression = rest.dropFirst().first
+                else {
                     fatalError("'label': argument mismatch")
                 }
+
+                let value = eval(valueExpression, in: &context)
+                context[name] = value
+                return value
             default:
                 let argumentValues = rest.map { eval($0, in: &context) }
                 return apply(function: name, with: argumentValues, in: context)
