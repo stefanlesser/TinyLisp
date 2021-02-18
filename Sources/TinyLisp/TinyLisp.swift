@@ -30,29 +30,13 @@ extension Expr: ExpressibleByArrayLiteral {
 }
 
 extension Expr {
-    private func apply(function name: String, with arguments: [Expr], in context: Environment) -> Expr {
+    private func apply(_ name: String, _ argumentExpressions: [Expr], _ context: inout Environment) -> Expr {
+        let argumentValues = argumentExpressions.map { $0.eval(in: &context) }
         switch context[name] {
-        case .function(let function): // it's a built-in function
-            return function(arguments)
-        case .list(let list): // it's a lambda to be evaluated
-            guard
-                case .atom("lambda") = list.first,
-                case .list(let argumentExpressions) = list.dropFirst().first,
-                let functionBody = list.dropFirst(2).first
-            else {
-                fatalError("Called apply with unexpected value")
-            }
-
-            var newContext: Environment = context
-            for (symbol, value) in zip(argumentExpressions, arguments) {
-                guard case .atom(let name) = symbol else { fatalError("Argument is not a symbol") }
-                newContext[name] = value
-            }
-            return functionBody.eval(in: &newContext)
-        case .atom:
-            fatalError("'\(name)' is not executable")
-        case .none:
-            fatalError("Undefined symbol: \(name)")
+        case .function(let function):   return function(argumentValues) // it's a built-in function
+        case .list(let list):           return lambda(list, argumentValues, context) // it's a lambda to be evaluated
+        case .atom:                     fatalError("'\(name)' is not executable")
+        case .none:                     fatalError("Undefined symbol: \(name)")
         }
     }
 
@@ -62,49 +46,67 @@ extension Expr {
             return context[symbol] ?? self // lookup value or pass expression back unchanged
         case .list(let list):
             switch (list.first, list.dropFirst()) {
-            case (.none, _): // empty list (aka nil)
-                return self
-            case (.atom(let name), let rest): // function call
-                switch name {
-                case "quote":
-                    return rest.first!
-                case "if":
-                    guard
-                        let conditionExpr = rest.first,
-                        let thenExpr = rest.dropFirst().first
-                    else {
-                        fatalError("'if': argument mismatch")
-                    }
-                    let elseExpr = rest.dropFirst(2).first
-
-                    let condition = conditionExpr.eval(in: &context)
-                    if case .list([]) = condition { // condition is false (empty list represents nil)
-                        guard let elseExpr = elseExpr else { return .list([]) } // else is optional
-                        return elseExpr.eval(in: &context)
-                    } else {
-                        return thenExpr.eval(in: &context)
-                    }
-                case "label":
-                    guard
-                        case .atom(let name) = rest.first,
-                        let valueExpression = rest.dropFirst().first
-                    else {
-                        fatalError("'label': argument mismatch")
-                    }
-
-                    let value = valueExpression.eval(in: &context)
-                    context[name] = value
-                    return value
-                default:
-                    let argumentValues = rest.map { $0.eval(in: &context) }
-                    return apply(function: name, with: argumentValues, in: context)
-                }
-            case (.function, _), (.list, _):
-                fatalError("First item in list is not a symbol")
+            case (.none, _):                        return self // empty list (aka nil)
+            case (.atom("quote"), let arguments):   return arguments.first! // quote must not eval rest
+            case (.atom("if"), let arguments):      return `if`(Array(arguments), &context)
+            case (.atom("label"), let arguments):   return label(Array(arguments), &context)
+            case (.atom(let name), let arguments):  return apply(name, Array(arguments), &context) // function call
+            case (.list, _),
+                 (.function, _):                    fatalError("First item in list is not a symbol")
             }
         case .function:
             fatalError("Didn't expect a function here")
         }
+    }
+}
+
+extension Expr { // Special forms
+    private func lambda(_ list: [Expr], _ arguments: [Expr], _ context: Environment) -> Expr {
+        guard
+            case .atom("lambda")                = list.first,
+            case .list(let argumentExpressions) = list.dropFirst().first,
+            let functionBody                    = list.dropFirst(2).first
+        else {
+            fatalError("Called apply with unexpected value")
+        }
+
+        var newContext: Environment = context
+        for (symbol, value) in zip(argumentExpressions, arguments) {
+            guard case .atom(let name) = symbol else { fatalError("Argument is not a symbol") }
+            newContext[name] = value
+        }
+        return functionBody.eval(in: &newContext)
+    }
+
+    private func `if`(_ rest: [Expr], _ context: inout Environment) -> Expr {
+        guard
+            let conditionExpr = rest.first,
+            let thenExpr =      rest.dropFirst().first
+        else {
+            fatalError("'if': argument mismatch")
+        }
+        let elseExpr = rest.dropFirst(2).first
+
+        let condition = conditionExpr.eval(in: &context)
+        if case .list([]) = condition { // condition is false (empty list represents nil)
+            guard let elseExpr = elseExpr else { return .list([]) } // else is optional
+            return elseExpr.eval(in: &context)
+        } else {
+            return thenExpr.eval(in: &context)
+        }
+    }
+
+    private func label(_ rest: [Expr], _ context: inout Environment) -> Expr {
+        guard
+            case .atom(let name) =  rest.first,
+            let valueExpression =   rest.dropFirst().first
+        else {
+            fatalError("'label': argument mismatch")
+        }
+
+        let value = valueExpression.eval(in: &context)
+        context[name] = value
+        return value
     }
 }
 
