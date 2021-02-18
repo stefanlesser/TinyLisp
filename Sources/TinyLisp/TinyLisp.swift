@@ -35,25 +35,27 @@ extension Expr {
         case .function(let function): // it's a built-in function
             return function(arguments, context)
         case .list(let list): // it's a lambda to be evaluated
-            switch (list.first, list.dropFirst().first, list.dropFirst().dropFirst().first) {
-            case (.atom("lambda"), .list(let argumentExpressions), let functionBody?):
-                var newContext: Environment = context
-                for (symbol, value) in zip(argumentExpressions, arguments) {
-                    guard case .atom(let name) = symbol
-                    else { fatalError("Argument is not a symbol") }
-                    newContext[name] = value
-                }
-                return functionBody.eval(in: &newContext)
-            default:
+            guard
+                case .atom("lambda") = list.first,
+                case .list(let argumentExpressions) = list.dropFirst().first,
+                let functionBody = list.dropFirst(2).first
+            else {
                 fatalError("Called apply with unexpected value")
             }
+
+            var newContext: Environment = context
+            for (symbol, value) in zip(argumentExpressions, arguments) {
+                guard case .atom(let name) = symbol else { fatalError("Argument is not a symbol") }
+                newContext[name] = value
+            }
+            return functionBody.eval(in: &newContext)
         case .atom(_):
             fatalError("'\(name)' is not executable")
         case .none:
             fatalError("Undefined symbol: \(name)")
         }
     }
-    
+
     func eval(in context: inout Environment) -> Expr {
         switch self {
         case .atom(let symbol):
@@ -74,7 +76,7 @@ extension Expr {
                         fatalError("'if': argument mismatch")
                     }
                     let elseExpr = rest.dropFirst(2).first
-                    
+
                     let condition = conditionExpr.eval(in: &context)
                     if case .list([]) = condition { // condition is false (empty list represents nil)
                         guard let elseExpr = elseExpr else { return .list([]) } // else is optional
@@ -89,7 +91,7 @@ extension Expr {
                     else {
                         fatalError("'label': argument mismatch")
                     }
-                    
+
                     let value = valueExpression.eval(in: &context)
                     context[name] = value
                     return value
@@ -129,7 +131,7 @@ class Lisp {
             if case .atom = args.first! { return .atom("T") } else { return .list([]) }
         },
     ]
-    
+
     func eval(_ expression: Expr) -> Expr {
         return expression.eval(in: &environment)
     }
