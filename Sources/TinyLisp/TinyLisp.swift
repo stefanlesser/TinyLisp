@@ -5,7 +5,7 @@ enum Expr {
 }
 
 typealias Environment = [String: Expr]
-typealias Function = ([Expr], Environment) -> Expr
+typealias Function = ([Expr]) -> Expr
 
 extension Expr: Equatable {
     static func == (lhs: Expr, rhs: Expr) -> Bool {
@@ -33,7 +33,7 @@ extension Expr {
     private func apply(function name: String, with arguments: [Expr], in context: Environment) -> Expr {
         switch context[name] {
         case .function(let function): // it's a built-in function
-            return function(arguments, context)
+            return function(arguments)
         case .list(let list): // it's a lambda to be evaluated
             guard
                 case .atom("lambda") = list.first,
@@ -49,7 +49,7 @@ extension Expr {
                 newContext[name] = value
             }
             return functionBody.eval(in: &newContext)
-        case .atom(_):
+        case .atom:
             fatalError("'\(name)' is not executable")
         case .none:
             fatalError("Undefined symbol: \(name)")
@@ -108,31 +108,31 @@ extension Expr {
     }
 }
 
-class Lisp {
+struct Lisp {
     var environment: Environment = [
-        "car": .function { args, context in
+        "car": .function { args in
             guard case .list(let list) = args.first else { fatalError() }
             return list.first!
         },
-        "cdr": .function { args, context in
+        "cdr": .function { args in
             guard case .list(let list) = args.first else { fatalError() }
             return .list(Array(list.dropFirst()))
         },
-        "cons": .function { args, context in
+        "cons": .function { args in
             let (element, listExpr) = (args.first!, args.dropFirst().first!)
             guard case .list(let list) = listExpr else { fatalError() }
             return .list([element] + list)
         },
-        "eq": .function { args, context in
+        "eq": .function { args in
             let (lhs, rhs) = (args.first!, args.dropFirst().first!)
             return lhs == rhs ? .atom("T") : .list([])
         },
-        "atom": .function { args, context in
+        "atom": .function { args in
             if case .atom = args.first! { return .atom("T") } else { return .list([]) }
-        },
+        }
     ]
 
-    func eval(_ expression: Expr) -> Expr {
+    mutating func eval(_ expression: Expr) -> Expr {
         return expression.eval(in: &environment)
     }
 }
