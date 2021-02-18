@@ -1,11 +1,11 @@
+typealias Environment = [String: Expr]
+typealias Function = ([Expr]) throws -> Expr
+
 enum Expr {
     case atom(String)
     indirect case list([Expr])
     case function(Function)
 }
-
-typealias Environment = [String: Expr]
-typealias Function = ([Expr]) -> Expr
 
 extension Expr: Equatable {
     static func == (lhs: Expr, rhs: Expr) -> Bool {
@@ -29,18 +29,22 @@ extension Expr: ExpressibleByArrayLiteral {
     }
 }
 
+struct InterpretationError: Error {
+    let message: String
+}
+
 extension Expr {
-    private func apply(_ name: String, _ argumentExpressions: [Expr], _ context: inout Environment) -> Expr {
-        let argumentValues = argumentExpressions.map { $0.eval(in: &context) }
+    private func apply(_ name: String, _ argumentExpressions: [Expr], _ context: inout Environment) throws -> Expr {
+        let argumentValues = try argumentExpressions.map { try $0.eval(in: &context) }
         switch context[name] {
-        case .function(let function):   return function(argumentValues) // it's a built-in function
-        case .list(let list):           return lambda(list, argumentValues, context) // it's a lambda to be evaluated
-        case .atom:                     fatalError("'\(name)' is not executable")
-        case .none:                     fatalError("Undefined symbol: \(name)")
+        case .function(let function):   return try function(argumentValues) // built-in function
+        case .list(let list):           return try lambda(list, argumentValues, context) // lambda to be evaluated
+        case .atom:                     throw InterpretationError(message: "'\(name)' is not executable")
+        case .none:                     throw InterpretationError(message: "Undefined symbol: \(name)")
         }
     }
 
-    func eval(in context: inout Environment) -> Expr {
+    func eval(in context: inout Environment) throws -> Expr {
         switch self {
         case .atom(let symbol):
             return context[symbol] ?? self // lookup value or pass expression back unchanged
@@ -48,63 +52,63 @@ extension Expr {
             switch (list.first, list.dropFirst()) {
             case (.none, _):                        return self // empty list (aka nil)
             case (.atom("quote"), let arguments):   return arguments.first! // quote must not eval rest
-            case (.atom("if"), let arguments):      return `if`(Array(arguments), &context)
-            case (.atom("label"), let arguments):   return label(Array(arguments), &context)
-            case (.atom(let name), let arguments):  return apply(name, Array(arguments), &context) // function call
+            case (.atom("if"), let arguments):      return try `if`(Array(arguments), &context)
+            case (.atom("label"), let arguments):   return try label(Array(arguments), &context)
+            case (.atom(let name), let arguments):  return try apply(name, Array(arguments), &context) // function call
             case (.list, _),
-                 (.function, _):                    fatalError("First item in list is not a symbol")
+                 (.function, _):                    throw InterpretationError(message: "First item in list is not a symbol")
             }
         case .function:
-            fatalError("Didn't expect a function here")
+            throw InterpretationError(message: "Didn't expect a function here")
         }
     }
 }
 
 extension Expr { // Special forms
-    private func lambda(_ list: [Expr], _ arguments: [Expr], _ context: Environment) -> Expr {
+    private func lambda(_ list: [Expr], _ arguments: [Expr], _ context: Environment) throws -> Expr {
         guard
             case .atom("lambda")                = list.first,
             case .list(let argumentExpressions) = list.dropFirst().first,
             let functionBody                    = list.dropFirst(2).first
         else {
-            fatalError("Called apply with unexpected value")
+            throw InterpretationError(message: "Called apply with unexpected value")
         }
 
         var newContext: Environment = context
         for (symbol, value) in zip(argumentExpressions, arguments) {
-            guard case .atom(let name) = symbol else { fatalError("Argument is not a symbol") }
+            guard case .atom(let name) = symbol else { throw InterpretationError(message: "Argument is not a symbol") }
             newContext[name] = value
         }
-        return functionBody.eval(in: &newContext)
+        return try functionBody.eval(in: &newContext)
     }
 
-    private func `if`(_ rest: [Expr], _ context: inout Environment) -> Expr {
+    private func `if`(_ rest: [Expr], _ context: inout Environment) throws -> Expr {
         guard
             let conditionExpr = rest.first,
             let thenExpr =      rest.dropFirst().first
         else {
-            fatalError("'if': argument mismatch")
+            throw InterpretationError(message: "'if': argument mismatch")
         }
         let elseExpr = rest.dropFirst(2).first
 
-        let condition = conditionExpr.eval(in: &context)
+        let condition = try conditionExpr.eval(in: &context)
         if case .list([]) = condition { // condition is false (empty list represents nil)
             guard let elseExpr = elseExpr else { return .list([]) } // else is optional
-            return elseExpr.eval(in: &context)
+            return try elseExpr.eval(in: &context)
         } else {
-            return thenExpr.eval(in: &context)
+            return try thenExpr.eval(in: &context)
         }
     }
 
-    private func label(_ rest: [Expr], _ context: inout Environment) -> Expr {
+    private func label(_ rest: [Expr], _ context: inout Environment) throws -> Expr {
         guard
             case .atom(let name) =  rest.first,
             let valueExpression =   rest.dropFirst().first
         else {
-            fatalError("'label': argument mismatch")
+            throw InterpretationError(message: "'label': argument mismatch")
         }
 
-        let value = valueExpression.eval(in: &context)
+        let value = try valueExpression.eval(in: &context)
         context[name] = value
         return value
     }
@@ -113,16 +117,24 @@ extension Expr { // Special forms
 struct Lisp {
     var environment: Environment = [
         "car": .function { args in
-            guard case .list(let list) = args.first else { fatalError() }
+            guard case .list(let list) = args.first else {
+                throw InterpretationError(message: "'car' expects argument that is a list")
+            }
             return list.first!
         },
         "cdr": .function { args in
-            guard case .list(let list) = args.first else { fatalError() }
+            guard case .list(let list) = args.first else {
+                throw InterpretationError(message: "'cdr' expects argument that is a list")
+            }
             return .list(Array(list.dropFirst()))
         },
         "cons": .function { args in
-            let (element, listExpr) = (args.first!, args.dropFirst().first!)
-            guard case .list(let list) = listExpr else { fatalError() }
+            guard
+                let element = args.first,
+                case .list(let list) = args.dropFirst().first
+            else {
+                throw InterpretationError(message: "'cons': argument mismatch")
+            }
             return .list([element] + list)
         },
         "eq": .function { args in
@@ -134,7 +146,7 @@ struct Lisp {
         }
     ]
 
-    mutating func eval(_ expression: Expr) -> Expr {
-        return expression.eval(in: &environment)
+    mutating func eval(_ expression: Expr) throws -> Expr {
+        return try expression.eval(in: &environment)
     }
 }
