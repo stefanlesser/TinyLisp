@@ -2,10 +2,17 @@ typealias Environment = [String: Expr]
 typealias Function = ([Expr]) throws -> Expr
 
 enum Expr {
-    case atom(String)
+    enum Atom {
+        case string(String)
+        case number(Int)
+    }
+
+    case atom(Atom)
     indirect case list([Expr])
     case function(Function)
 }
+
+extension Expr.Atom: Equatable {}
 
 extension Expr: Equatable {
     static func == (lhs: Expr, rhs: Expr) -> Bool {
@@ -17,15 +24,46 @@ extension Expr: Equatable {
     }
 }
 
+extension Expr: ExpressibleByIntegerLiteral {
+    init(integerLiteral value: IntegerLiteralType) {
+        self = .atom(.number(value))
+    }
+}
+
 extension Expr: ExpressibleByStringLiteral {
     init(stringLiteral value: String) {
-        self = .atom(value)
+        self = .atom(.string(value))
     }
 }
 
 extension Expr: ExpressibleByArrayLiteral {
     init(arrayLiteral elements: Expr...) {
         self = .list(elements)
+    }
+}
+
+extension Array where Element == Expr {
+    var debugDescription: String {
+        return self.map(\.description).joined(separator: " ")
+    }
+}
+
+extension Expr.Atom: CustomStringConvertible {
+    var description: String {
+        switch self {
+        case .string(let string): return string
+        case .number(let number): return number.description
+        }
+    }
+}
+
+extension Expr: CustomStringConvertible {
+    var description: String {
+        switch self {
+        case .atom(let atom):   return atom.description
+        case .list(let list):   return "(\(list.map(\.description).joined(separator: " ")))"
+        case .function:         return "<#func>"
+        }
     }
 }
 
@@ -46,17 +84,21 @@ extension Expr {
 
     func eval(in context: inout Environment) throws -> Expr {
         switch self {
-        case .atom(let symbol):
-            return context[symbol] ?? self // lookup value or pass expression back unchanged
+        case .atom(let atom):
+            switch atom {
+            case .string(let symbol):   return context[symbol] ?? self // lookup value or pass expression back unchanged
+            case .number:               return self
+            }
         case .list(let list):
             switch (list.first, list.dropFirst()) {
-            case (.none, _):                        return self // empty list (aka nil)
-            case (.atom("quote"), let arguments):   return arguments.first! // quote must not eval rest
-            case (.atom("if"), let arguments):      return try `if`(Array(arguments), &context)
-            case (.atom("label"), let arguments):   return try label(Array(arguments), &context)
-            case (.atom(let name), let arguments):  return try apply(name, Array(arguments), &context) // function call
-            case (.list, _),
-                 (.function, _):                    throw InterpretationError(message: "First item in list is not a symbol")
+            case (.none, _):                                return self // empty list (aka nil)
+            case (.atom(.string("quote")), let arguments):  return arguments.first! // quote must not eval rest
+            case (.atom(.string("if")), let arguments):     return try `if`(Array(arguments), &context)
+            case (.atom(.string("label")), let arguments):  return try label(Array(arguments), &context)
+            case (.atom(.string(let name)), let arguments): return try apply(name, Array(arguments), &context) // function call
+            case (.atom(.number), _),
+                 (.list, _),
+                 (.function, _):                            throw InterpretationError(message: "First item in list not a symbol")
             }
         case .function:
             throw InterpretationError(message: "Didn't expect a function here")
@@ -67,7 +109,7 @@ extension Expr {
 extension Expr { // Special forms
     private func lambda(_ list: [Expr], _ arguments: [Expr], _ context: Environment) throws -> Expr {
         guard
-            case .atom("lambda")                = list.first,
+            case .atom(.string("lambda"))       = list.first,
             case .list(let argumentExpressions) = list.dropFirst().first,
             let functionBody                    = list.dropFirst(2).first
         else {
@@ -76,7 +118,9 @@ extension Expr { // Special forms
 
         var newContext: Environment = context
         for (symbol, value) in zip(argumentExpressions, arguments) {
-            guard case .atom(let name) = symbol else { throw InterpretationError(message: "Argument is not a symbol") }
+            guard case .atom(.string(let name)) = symbol else {
+                throw InterpretationError(message: "Argument is not a symbol")
+            }
             newContext[name] = value
         }
         return try functionBody.eval(in: &newContext)
@@ -102,8 +146,8 @@ extension Expr { // Special forms
 
     private func label(_ rest: [Expr], _ context: inout Environment) throws -> Expr {
         guard
-            case .atom(let name) =  rest.first,
-            let valueExpression =   rest.dropFirst().first
+            case .atom(.string(let name)) = rest.first,
+            let valueExpression =           rest.dropFirst().first
         else {
             throw InterpretationError(message: "'label': argument mismatch")
         }
@@ -139,11 +183,38 @@ struct Lisp {
         },
         "eq": .function { args in
             let (lhs, rhs) = (args.first!, args.dropFirst().first!)
-            return lhs == rhs ? .atom("T") : .list([])
+            return lhs == rhs ? .atom(.string("T")) : .list([])
         },
         "atom": .function { args in
-            if case .atom = args.first! { return .atom("T") } else { return .list([]) }
-        }
+            if case .atom = args.first! { return .atom(.string("T")) } else { return .list([]) }
+        },
+        "<": .function { args in
+            guard
+                case .atom(.number(let lhs)) = args.first,
+                case .atom(.number(let rhs)) = args.dropFirst().first
+            else {
+                throw InterpretationError(message: "'<': argument mismatch")
+            }
+            return lhs < rhs ? .atom(.string("T")) : .list([])
+        },
+        "+": .function { args in
+            guard
+                case .atom(.number(let lhs)) = args.first,
+                case .atom(.number(let rhs)) = args.dropFirst().first
+            else {
+                throw InterpretationError(message: "'+': argument mismatch")
+            }
+            return .atom(.number(lhs + rhs))
+        },
+        "-": .function { args in
+            guard
+                case .atom(.number(let lhs)) = args.first,
+                case .atom(.number(let rhs)) = args.dropFirst().first
+            else {
+                throw InterpretationError(message: "'-': argument mismatch")
+            }
+            return .atom(.number(lhs - rhs))
+        },
     ]
 
     mutating func eval(_ expression: Expr) throws -> Expr {
