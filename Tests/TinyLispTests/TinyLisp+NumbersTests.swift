@@ -1,8 +1,14 @@
 import XCTest
 @testable import TinyLisp
 
-final class TinyLispTests: XCTestCase {
-    var lisp: Lisp1 = Lisp1()
+final class TinyLisp2Tests: XCTestCase {
+    var lisp: Lisp2 = Lisp2()
+
+    let fib: Expr = ["label", "fib",
+                      ["quote", ["lambda", ["n"],
+                        ["if", ["<", "n", 2],
+                        "n",
+                        ["+", ["fib", ["-", "n", 1]], ["fib", ["-", "n", 2]]]]]]]
 
     func testAtomValue() {
         XCTAssertEqual("abc", try lisp.eval("abc"))
@@ -48,5 +54,26 @@ final class TinyLispTests: XCTestCase {
     func testLambda() throws {
         _ = try lisp.eval(["label", "second", ["quote", ["lambda", ["x"], ["car", ["cdr", "x"]]]]])
         XCTAssertEqual("2", try lisp.eval(["second", ["quote", ["1", "2", "3"]]]))
+    }
+
+    func testFib() throws {
+        _ = try lisp.eval(fib)
+        XCTAssertEqual(1, try lisp.eval(["fib", 1]))
+        XCTAssertEqual(1, try lisp.eval(["fib", 2]))
+        XCTAssertEqual(2, try lisp.eval(["fib", 3]))
+        XCTAssertEqual(3, try lisp.eval(["fib", 4]))
+        XCTAssertEqual(5, try lisp.eval(["fib", 5]))
+        XCTAssertEqual(8, try lisp.eval(["fib", 6]))
+        XCTAssertEqual(13, try lisp.eval(["fib", 7]))
+        XCTAssertEqual(21, try lisp.eval(["fib", 8]))
+        XCTAssertEqual(34, try lisp.eval(["fib", 9]))
+        XCTAssertEqual(55, try lisp.eval(["fib", 10]))
+    }
+
+    func testFibPerformance() throws {
+        _ = try lisp.eval(fib)
+        measure {
+            XCTAssertEqual(6765, try? lisp.eval(["fib", 20])) // average: 0.17 sec
+        }
     }
 }
