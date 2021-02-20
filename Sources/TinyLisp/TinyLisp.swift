@@ -1,10 +1,9 @@
 enum Expr<AtomType: Equatable & LosslessStringConvertible & ExpressibleByStringLiteral> {
     typealias Environment = [String: Expr]
-    typealias Function = ([Expr]) throws -> Expr
 
     case atom(AtomType)
-    indirect case list([Expr])
-    case function(Function)
+    indirect case list(ArraySlice<Expr>)
+    case function((ArraySlice<Expr>) throws -> Expr)
 }
 
 extension Expr: Equatable {
@@ -25,7 +24,7 @@ extension Expr: ExpressibleByStringLiteral {
 
 extension Expr: ExpressibleByArrayLiteral {
     init(arrayLiteral elements: Expr...) {
-        self = .list(elements)
+        self = .list(ArraySlice(elements))
     }
 }
 
@@ -44,8 +43,8 @@ struct InterpretationError: Error {
 }
 
 extension Expr {
-    private func apply(_ name: String, _ argumentExpressions: [Expr], _ context: inout Environment) throws -> Expr {
-        let argumentValues = try argumentExpressions.map { try $0.eval(in: &context) }
+    private func apply(_ name: String, _ argumentExpressions: ArraySlice<Expr>, _ context: inout Environment) throws -> Expr {
+        let argumentValues = ArraySlice(try argumentExpressions.map { try $0.eval(in: &context) })
         switch context[name] {
         case .function(let function):   return try function(argumentValues) // built-in function
         case .list(let list):           return try lambda(list, argumentValues, context) // lambda to be evaluated
@@ -63,8 +62,8 @@ extension Expr {
             case (.none, _):
                 return self // empty list (aka nil)
             case (.atom(let name), let arguments):
-                if let function = specialForms[name.description] { return try function(Array(arguments), &context) }
-                return try apply(name.description, Array(arguments), &context) // function call
+                if let function = specialForms[name.description] { return try function(arguments, &context) }
+                return try apply(name.description, arguments, &context) // function call
             case (.list, _),
                  (.function, _):
                 throw InterpretationError(message: "First item in list not a symbol")
@@ -76,7 +75,7 @@ extension Expr {
 }
 
 extension Expr { // Special forms
-    var specialForms: [String: ([Expr], inout Environment) throws -> Expr] {
+    var specialForms: [String: (ArraySlice<Expr>, inout Environment) throws -> Expr] {
         [
             "quote": { arguments, _ in
                 return arguments.first! // quote must not eval rest
@@ -113,7 +112,7 @@ extension Expr { // Special forms
         ]
     }
 
-    private func lambda(_ list: [Expr], _ arguments: [Expr], _ context: Environment) throws -> Expr {
+    private func lambda(_ list: ArraySlice<Expr>, _ arguments: ArraySlice<Expr>, _ context: Environment) throws -> Expr {
         guard
             case .atom("lambda")                = list.first,
             case .list(let argumentExpressions) = list.dropFirst().first,
@@ -159,7 +158,7 @@ extension Lisp {
                 guard case .list(let list) = args.first else {
                     throw InterpretationError(message: "'cdr' expects argument that is a list")
                 }
-                return .list(Array(list.dropFirst()))
+                return .list(list.dropFirst())
             },
             "cons": .function { args in
                 guard
