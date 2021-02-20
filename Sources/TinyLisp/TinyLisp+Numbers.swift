@@ -40,8 +40,8 @@ extension Atom: Equatable {}
 
 extension Lisp where AtomType == Atom {
     mutating func installNumberBuiltIns() {
-        let numberBuiltIns: Expr<Atom>.Environment = [
-            "<": .function { args in
+        let numberBuiltIns: [String: Expr<Atom>.Function] = [
+            "<": .builtIn { args in
                 guard
                     case .atom(.number(let lhs)) = args.first,
                     case .atom(.number(let rhs)) = args.dropFirst().first
@@ -50,7 +50,7 @@ extension Lisp where AtomType == Atom {
                 }
                 return lhs < rhs ? true : false
             },
-            "+": .function { args in
+            "+": .builtIn { args in
                 guard
                     case .atom(.number(let lhs)) = args.first,
                     case .atom(.number(let rhs)) = args.dropFirst().first
@@ -59,7 +59,7 @@ extension Lisp where AtomType == Atom {
                 }
                 return .atom(.number(lhs + rhs))
             },
-            "-": .function { args in
+            "-": .builtIn { args in
                 guard
                     case .atom(.number(let lhs)) = args.first,
                     case .atom(.number(let rhs)) = args.dropFirst().first
@@ -69,7 +69,8 @@ extension Lisp where AtomType == Atom {
                 return .atom(.number(lhs - rhs))
             },
         ]
-        for (key, value) in numberBuiltIns {
+        
+        for (key, value) in numberBuiltIns.mapValues({ Expr<AtomType>.function($0) }) {
             environment[key] = value
         }
     }

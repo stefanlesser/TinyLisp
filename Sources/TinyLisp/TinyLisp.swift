@@ -1,9 +1,14 @@
 enum Expr<AtomType: Equatable & LosslessStringConvertible & ExpressibleByStringLiteral> {
     typealias Environment = [String: Expr]
 
+    enum Function {
+        case specialForm((ArraySlice<Expr>, inout Environment) throws -> Expr)
+        case builtIn((ArraySlice<Expr>) throws -> Expr)
+    }
+
     case atom(AtomType)
     indirect case list(ArraySlice<Expr>)
-    case function((ArraySlice<Expr>) throws -> Expr)
+    case function(Function)
 }
 
 extension Expr: Equatable {
@@ -49,40 +54,44 @@ struct InterpretationError: Error {
 }
 
 extension Expr {
-    private func apply(_ name: String, _ argumentExpressions: ArraySlice<Expr>, _ context: inout Environment) throws -> Expr {
-        let argumentValues = ArraySlice(try argumentExpressions.map { try $0.eval(in: &context) })
-        switch context[name] {
-        case .function(let function):   return try function(argumentValues) // built-in function
-        case .list(let list):           return try lambda(list, argumentValues, context) // lambda to be evaluated
-        case .atom:                     throw InterpretationError(message: "'\(name)' is not executable")
-        case .none:                     throw InterpretationError(message: "Undefined symbol: \(name)")
+    private func apply(_ function: Expr, _ arguments: ArraySlice<Expr>, _ context: inout Environment) throws -> Expr {
+        switch function {
+        case .function(let function): // apply function
+            switch function {
+            case .specialForm(let specialForm):
+                return try specialForm(arguments, &context)
+            case .builtIn(let builtIn):
+                let evaluatedArguments = ArraySlice(try arguments.map { try $0.eval(in: &context) })
+                return try builtIn(evaluatedArguments)
+            }
+        case .list(let list):
+            let evaluatedArguments = ArraySlice(try arguments.map { try $0.eval(in: &context) })
+            return try lambda(list, evaluatedArguments, context) // lambda to be evaluated
+        case .atom(let name):
+            throw InterpretationError(message: "'\(name)' is not executable")
         }
     }
 
     func eval(in context: inout Environment) throws -> Expr {
         switch self {
-        case .atom(let atom):
-            return context[atom.description] ?? self // lookup value or pass expression back unchanged
-        case .list(let list):
-            guard case .atom(let name) = list.first else {
-                throw InterpretationError(message: "First item in list not a symbol")
-            }
-            let arguments = list.dropFirst()
-            if let function = specialForms[name.description] { return try function(arguments, &context) }
-            return try apply(name.description, arguments, &context) // function call
         case .function:
-            throw InterpretationError(message: "Didn't expect a function here")
+            return self
+        case .list(let list):
+            let function = try list.first!.eval(in: &context)
+            return try apply(function, list.dropFirst(), &context)
+        case .atom(let atom): // lookup symbol or pass atom back unchanged
+            return specialForms[atom.description] ?? context[atom.description] ?? self
         }
     }
 }
 
 extension Expr { // Special forms
-    var specialForms: [String: (ArraySlice<Expr>, inout Environment) throws -> Expr] {
+    var specialForms: [String: Expr] {
         [
-            "quote": { arguments, _ in
+            "quote": .function(.specialForm { arguments, _ in
                 return arguments.first! // quote must not eval rest
-            },
-            "if": { arguments, context in
+            }),
+            "if": .function(.specialForm { arguments, context in
                 guard
                     let conditionExpr = arguments.first,
                     let thenExpr =      arguments.dropFirst().first
@@ -98,8 +107,8 @@ extension Expr { // Special forms
                 } else {
                     return try thenExpr.eval(in: &context)
                 }
-            },
-            "label": { arguments, context in
+            }),
+            "label": .function(.specialForm { arguments, context in
                 guard
                     case .atom(let name) =  arguments.first,
                     let valueExpression =   arguments.dropFirst().first
@@ -110,7 +119,7 @@ extension Expr { // Special forms
                 let value = try valueExpression.eval(in: &context)
                 context[name.description] = value
                 return value
-            }
+            })
         ]
     }
 
@@ -149,20 +158,20 @@ extension Lisp {
 
 extension Lisp {
     mutating func installBuiltIns() {
-        let builtIns: Expr<AtomType>.Environment = [
-            "car": .function { args in
+        let builtIns: [String: Expr<AtomType>.Function] = [
+            "car": .builtIn { args in
                 guard case .list(let list) = args.first else {
                     throw InterpretationError(message: "'car' expects argument that is a list")
                 }
                 return list.first!
             },
-            "cdr": .function { args in
+            "cdr": .builtIn { args in
                 guard case .list(let list) = args.first else {
                     throw InterpretationError(message: "'cdr' expects argument that is a list")
                 }
                 return .list(list.dropFirst())
             },
-            "cons": .function { args in
+            "cons": .builtIn { args in
                 guard
                     let element = args.first,
                     case .list(let list) = args.dropFirst().first
@@ -171,15 +180,15 @@ extension Lisp {
                 }
                 return .list([element] + list)
             },
-            "eq": .function { args in
+            "eq": .builtIn { args in
                 let (lhs, rhs) = (args.first!, args.dropFirst().first!)
                 return lhs == rhs ? true : false
             },
-            "atom": .function { args in
+            "atom": .builtIn { args in
                 if case .atom = args.first! { return true } else { return false }
             },
         ]
-        environment = builtIns
+        environment = builtIns.mapValues { Expr<AtomType>.function($0) }
     }
 }
 
