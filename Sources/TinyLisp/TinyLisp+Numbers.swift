@@ -48,7 +48,7 @@ extension Lisp where AtomType == Atom {
                 else {
                     throw InterpretationError(message: "'<': argument mismatch")
                 }
-                return lhs < rhs ? .atom(.string("T")) : .list([])
+                return lhs < rhs ? true : false
             },
             "+": .function { args in
                 guard

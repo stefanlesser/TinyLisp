@@ -20,8 +20,8 @@ class TinyLispTests: XCTestCase {
 
     func testEqAtom() throws {
         _ = try lisp.eval(["label", "a", "42"])
-        XCTAssertEqual("T", try lisp.eval(["eq", "42", "a"]))
-        XCTAssertEqual([], try lisp.eval(["eq", "43", "a"]))
+        XCTAssertEqual(true, try lisp.eval(["eq", "42", "a"]))
+        XCTAssertEqual(false, try lisp.eval(["eq", "43", "a"]))
     }
 
     func testQuoteList() {
@@ -34,8 +34,8 @@ class TinyLispTests: XCTestCase {
     }
 
     func testIsAtom() {
-        XCTAssertEqual([], try lisp.eval(["atom", ["quote", ["1", "2"]]]))
-        XCTAssertEqual("T", try lisp.eval(["atom", ["quote", "2"]]))
+        XCTAssertEqual(false, try lisp.eval(["atom", ["quote", ["1", "2"]]]))
+        XCTAssertEqual(true, try lisp.eval(["atom", ["quote", "2"]]))
     }
 
     func testCar() {

@@ -16,6 +16,12 @@ extension Expr: Equatable {
     }
 }
 
+extension Expr: ExpressibleByBooleanLiteral {
+    init(booleanLiteral value: BooleanLiteralType) {
+        self = .atom(value == false ? "nil" : "T") // only place that defines which Expr represent true and false
+    }
+}
+
 extension Expr: ExpressibleByStringLiteral {
     init(stringLiteral value: String) {
         self = .atom(AtomType(value)!) // AtomType conforms to LosslessStringConvertible
@@ -58,16 +64,12 @@ extension Expr {
         case .atom(let atom):
             return context[atom.description] ?? self // lookup value or pass expression back unchanged
         case .list(let list):
-            switch (list.first, list.dropFirst()) {
-            case (.none, _):
-                return self // empty list (aka nil)
-            case (.atom(let name), let arguments):
-                if let function = specialForms[name.description] { return try function(arguments, &context) }
-                return try apply(name.description, arguments, &context) // function call
-            case (.list, _),
-                 (.function, _):
+            guard case .atom(let name) = list.first else {
                 throw InterpretationError(message: "First item in list not a symbol")
             }
+            let arguments = list.dropFirst()
+            if let function = specialForms[name.description] { return try function(arguments, &context) }
+            return try apply(name.description, arguments, &context) // function call
         case .function:
             throw InterpretationError(message: "Didn't expect a function here")
         }
@@ -90,8 +92,8 @@ extension Expr { // Special forms
                 let elseExpr = arguments.dropFirst(2).first
 
                 let condition = try conditionExpr.eval(in: &context)
-                if case .list([]) = condition { // condition is false (empty list represents nil)
-                    guard let elseExpr = elseExpr else { return .list([]) } // else is optional
+                if condition == false { // possible through ExpressibleByBooleanLiteral conformance
+                    guard let elseExpr = elseExpr else { return false } // else is optional
                     return try elseExpr.eval(in: &context)
                 } else {
                     return try thenExpr.eval(in: &context)
@@ -171,10 +173,10 @@ extension Lisp {
             },
             "eq": .function { args in
                 let (lhs, rhs) = (args.first!, args.dropFirst().first!)
-                return lhs == rhs ? .atom("T") : .list([])
+                return lhs == rhs ? true : false
             },
             "atom": .function { args in
-                if case .atom = args.first! { return .atom("T") } else { return .list([]) }
+                if case .atom = args.first! { return true } else { return false }
             },
         ]
         environment = builtIns
