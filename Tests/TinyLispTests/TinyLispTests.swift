@@ -1,8 +1,13 @@
 import XCTest
 @testable import TinyLisp
 
-final class TinyLispTests: XCTestCase {
-    var lisp: Lisp1 = Lisp1()
+class TinyLispTests: XCTestCase {
+    private var lisp: Lisp1!
+
+    override func setUp() {
+        super.setUp()
+        lisp = Lisp1()
+    }
 
     func testAtomValue() {
         XCTAssertEqual("abc", try lisp.eval("abc"))
