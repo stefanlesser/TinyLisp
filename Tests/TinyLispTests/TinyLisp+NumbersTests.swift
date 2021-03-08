@@ -1,12 +1,12 @@
 import XCTest
 @testable import TinyLisp
 
-final class TinyLisp2Tests: TinyLispTests {
-    private var lisp: Lisp2!
+final class TinyLispNumbersTests: TinyLispBooleanTests {
+    private var lisp: LispNumbers!
 
     override func setUp() {
         super.setUp()
-        lisp = Lisp2()
+        lisp = LispNumbers()
     }
 
     private let fib: Expr = ["label", "fib",

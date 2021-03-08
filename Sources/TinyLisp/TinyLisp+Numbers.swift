@@ -76,11 +76,14 @@ extension Lisp where AtomType == Atom {
     }
 }
 
-struct Lisp2: Lisp {
+struct LispNumbers: Lisp {
     var environment: Expr<Atom>.Environment = [:]
 
     init() {
+        installSpecialForms()
+        installIfSpecialForm()
         installBuiltIns()
+        installIfBuiltIns()
         installNumberBuiltIns()
     }
 }

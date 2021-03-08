@@ -11,22 +11,6 @@ enum Expr<AtomType: Equatable & LosslessStringConvertible & ExpressibleByStringL
     case function(Function)
 }
 
-extension Expr: Equatable {
-    static func == (lhs: Expr, rhs: Expr) -> Bool {
-        switch (lhs, rhs) {
-        case (.atom(let lhs), .atom(let rhs)):  return lhs == rhs
-        case (.list(let lhs), .list(let rhs)):  return lhs == rhs
-        default:                                return false
-        }
-    }
-}
-
-extension Expr: ExpressibleByBooleanLiteral {
-    init(booleanLiteral value: BooleanLiteralType) {
-        self = .atom(value == false ? "nil" : "T") // only place that defines which Expr represent true and false
-    }
-}
-
 extension Expr: ExpressibleByStringLiteral {
     init(stringLiteral value: String) {
         self = .atom(AtomType(value)!) // AtomType conforms to LosslessStringConvertible
@@ -80,52 +64,16 @@ extension Expr {
             let function = try list.first!.eval(in: &context)
             return try apply(function, list.dropFirst(), &context)
         case .atom(let atom): // lookup symbol or pass atom back unchanged
-            return specialForms[atom.description] ?? context[atom.description] ?? self
+            return context[atom.description] ?? self
         }
     }
 }
 
 extension Expr { // Special forms
-    var specialForms: [String: Expr] {
-        [
-            "quote": .function(.specialForm { arguments, _ in
-                return arguments.first! // quote must not eval rest
-            }),
-            "if": .function(.specialForm { arguments, context in
-                guard
-                    let conditionExpr = arguments.first,
-                    let thenExpr =      arguments.dropFirst().first
-                else {
-                    throw InterpretationError(message: "'if': argument mismatch")
-                }
-                let elseExpr = arguments.dropFirst(2).first
-
-                let condition = try conditionExpr.eval(in: &context)
-                if condition == false { // possible through ExpressibleByBooleanLiteral conformance
-                    guard let elseExpr = elseExpr else { return false } // else is optional
-                    return try elseExpr.eval(in: &context)
-                } else {
-                    return try thenExpr.eval(in: &context)
-                }
-            }),
-            "label": .function(.specialForm { arguments, context in
-                guard
-                    case .atom(let name) =  arguments.first,
-                    let valueExpression =   arguments.dropFirst().first
-                else {
-                    throw InterpretationError(message: "'label': argument mismatch")
-                }
-
-                let value = try valueExpression.eval(in: &context)
-                context[name.description] = value
-                return value
-            })
-        ]
-    }
-
+    // TODO: merge into specialForms
     private func lambda(_ list: ArraySlice<Expr>, _ arguments: ArraySlice<Expr>, _ context: Environment) throws -> Expr {
         guard
-            case .atom("lambda")                = list.first,
+            case .atom("lambda")                = list.first, // requires AtomType to conform to Equatable
             case .list(let argumentExpressions) = list.dropFirst().first,
             let functionBody                    = list.dropFirst(2).first
         else {
@@ -157,6 +105,27 @@ extension Lisp {
 }
 
 extension Lisp {
+    mutating func installSpecialForms() {
+        let specialForms: [String: Expr<AtomType>.Function] = [
+            "quote": .specialForm { arguments, _ in
+                return arguments.first! // quote must not eval rest
+            },
+            "label": .specialForm { arguments, context in
+                guard
+                    case .atom(let name) =  arguments.first,
+                    let valueExpression =   arguments.dropFirst().first
+                else {
+                    throw InterpretationError(message: "'label': argument mismatch")
+                }
+
+                let value = try valueExpression.eval(in: &context)
+                context[name.description] = value
+                return value
+            }
+        ]
+        environment.merge(specialForms.mapValues { Expr<AtomType>.function($0) }) { a, b in a }
+    }
+
     mutating func installBuiltIns() {
         let builtIns: [String: Expr<AtomType>.Function] = [
             "car": .builtIn { args in
@@ -180,22 +149,16 @@ extension Lisp {
                 }
                 return .list([element] + list)
             },
-            "eq": .builtIn { args in
-                let (lhs, rhs) = (args.first!, args.dropFirst().first!)
-                return lhs == rhs ? true : false
-            },
-            "atom": .builtIn { args in
-                if case .atom = args.first! { return true } else { return false }
-            },
         ]
-        environment = builtIns.mapValues { Expr<AtomType>.function($0) }
+        environment.merge(builtIns.mapValues { Expr<AtomType>.function($0) }) { a, b in a }
     }
 }
 
-struct Lisp1: Lisp {
+struct LispMinimal: Lisp {
     var environment: Expr<String>.Environment = [:]
 
     init() {
+        installSpecialForms()
         installBuiltIns()
     }
 }
