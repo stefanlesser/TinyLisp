@@ -14,52 +14,46 @@ extension Expr: ExpressibleByBooleanLiteral {
     }
 }
 
-extension Lisp {
-    mutating func installIfSpecialForm() {
-        let specialFormsIf: [String: Expr<AtomType>.Function] =
-            [
-                "if": .specialForm { arguments, context in
-                    guard
-                        let conditionExpr = arguments.first,
-                        let thenExpr =      arguments.dropFirst().first
-                    else {
-                        throw InterpretationError(message: "'if': argument mismatch")
-                    }
-                    let elseExpr = arguments.dropFirst(2).first
+extension Expr {
+    static func `if`(_ arguments: ArraySlice<Expr>, _ context: inout Environment) throws -> Expr {
+        guard
+            let conditionExpr = arguments.first,
+            let thenExpr =      arguments.dropFirst().first
+        else {
+            throw InterpretationError(message: "'if': argument mismatch")
+        }
+        let elseExpr = arguments.dropFirst(2).first
 
-                    let condition = try conditionExpr.eval(in: &context)
-                    if condition == false { // possible through ExpressibleByBooleanLiteral conformance
-                        guard let elseExpr = elseExpr else { return false } // else is optional
-                        return try elseExpr.eval(in: &context)
-                    } else {
-                        return try thenExpr.eval(in: &context)
-                    }
-                },
-            ]
-        environment.merge(specialFormsIf.mapValues { Expr<AtomType>.function($0) }) { a, b in a }
+        let condition = try conditionExpr.eval(in: &context)
+        if condition == false { // possible through ExpressibleByBooleanLiteral conformance
+            guard let elseExpr = elseExpr else { return false } // else is optional
+            return try elseExpr.eval(in: &context)
+        } else {
+            return try thenExpr.eval(in: &context)
+        }
     }
 
-    mutating func installIfBuiltIns() {
-        let builtIns: [String: Expr<AtomType>.Function] = [
-            "eq": .builtIn { args in
-                let (lhs, rhs) = (args.first!, args.dropFirst().first!)
-                return lhs == rhs ? true : false
-            },
-            "atom": .builtIn { args in
-                if case .atom = args.first! { return true } else { return false }
-            },
-        ]
-        environment.merge(builtIns.mapValues { Expr<AtomType>.function($0) }) { a, b in a }
+    static func eq(_ arguments: ArraySlice<Expr>) throws -> Expr {
+        let (lhs, rhs) = (arguments.first!, arguments.dropFirst().first!)
+        return lhs == rhs ? true : false
+    }
+
+    static func atom(_ arguments: ArraySlice<Expr>) throws -> Expr {
+        if case .atom = arguments.first! { return true } else { return false }
     }
 }
 
 struct LispBoolean: Lisp {
     var environment: Expr<Atom>.Environment = [:]
 
+    static var booleanEnvironment: Expr<AtomType>.Environment = [
+        "if": .function(.specialForm(Expr.if(_:_:))),
+        "eq": .function(.builtIn(Expr.eq(_:))),
+        "atom": .function(.builtIn(Expr.atom(_:))),
+    ]
+
     init() {
-        installSpecialForms()
-        installIfSpecialForm()
-        installBuiltIns()
-        installIfBuiltIns()
+        environment = LispMinimal.basicEnvironment()
+        environment.merge(Self.booleanEnvironment) { a, b in a }
     }
 }

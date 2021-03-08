@@ -3,6 +3,8 @@ enum Atom {
     case number(Int)
 }
 
+extension Atom: Equatable {}
+
 extension Atom: ExpressibleByIntegerLiteral {
     init(integerLiteral value: IntegerLiteralType) {
         self = .number(value)
@@ -36,42 +38,26 @@ extension Atom: LosslessStringConvertible {
     }
 }
 
-extension Atom: Equatable {}
+extension Expr where AtomType == Atom {
+    static func lowerThan(_ arguments: ArraySlice<Expr>) throws -> Expr {
+        guard
+            case .atom(.number(let lhs)) = arguments.first,
+            case .atom(.number(let rhs)) = arguments.dropFirst().first
+        else {
+            throw InterpretationError(message: "'<': argument mismatch")
+        }
+        return lhs < rhs ? true : false
+    }
 
-extension Lisp where AtomType == Atom {
-    mutating func installNumberBuiltIns() {
-        let numberBuiltIns: [String: Expr<Atom>.Function] = [
-            "<": .builtIn { args in
-                guard
-                    case .atom(.number(let lhs)) = args.first,
-                    case .atom(.number(let rhs)) = args.dropFirst().first
-                else {
-                    throw InterpretationError(message: "'<': argument mismatch")
-                }
-                return lhs < rhs ? true : false
-            },
-            "+": .builtIn { args in
-                guard
-                    case .atom(.number(let lhs)) = args.first,
-                    case .atom(.number(let rhs)) = args.dropFirst().first
-                else {
-                    throw InterpretationError(message: "'+': argument mismatch")
-                }
-                return .atom(.number(lhs + rhs))
-            },
-            "-": .builtIn { args in
-                guard
-                    case .atom(.number(let lhs)) = args.first,
-                    case .atom(.number(let rhs)) = args.dropFirst().first
-                else {
-                    throw InterpretationError(message: "'-': argument mismatch")
-                }
-                return .atom(.number(lhs - rhs))
-            },
-        ]
-        
-        for (key, value) in numberBuiltIns.mapValues({ Expr<AtomType>.function($0) }) {
-            environment[key] = value
+    static func arithmeticOp(_ operation: @escaping (Int, Int) -> Int) -> (ArraySlice<Expr>) throws -> Expr {
+        return { arguments in
+            guard
+                case .atom(.number(let lhs)) = arguments.first,
+                case .atom(.number(let rhs)) = arguments.dropFirst().first
+            else {
+                throw InterpretationError(message: "arithmetic operation: argument mismatch")
+            }
+            return .atom(.number(operation(lhs, rhs)))
         }
     }
 }
@@ -79,11 +65,17 @@ extension Lisp where AtomType == Atom {
 struct LispNumbers: Lisp {
     var environment: Expr<Atom>.Environment = [:]
 
+    static var numbersEnvironment: Expr<Atom>.Environment = [
+        "<": .function(.builtIn(Expr.lowerThan(_:))),
+        "+": .function(.builtIn(Expr.arithmeticOp(+))),
+        "-": .function(.builtIn(Expr.arithmeticOp(-))),
+        "*": .function(.builtIn(Expr.arithmeticOp(*))),
+        "/": .function(.builtIn(Expr.arithmeticOp(/))),
+    ]
+
     init() {
-        installSpecialForms()
-        installIfSpecialForm()
-        installBuiltIns()
-        installIfBuiltIns()
-        installNumberBuiltIns()
+        environment = LispMinimal.basicEnvironment()
+        environment.merge(LispBoolean.booleanEnvironment) { a, b in a }
+        environment.merge(Self.numbersEnvironment) { a, b in a }
     }
 }

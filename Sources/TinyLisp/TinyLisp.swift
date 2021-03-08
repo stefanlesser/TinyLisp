@@ -89,6 +89,47 @@ extension Expr { // Special forms
         }
         return try functionBody.eval(in: &newContext)
     }
+
+    static func quote(_ arguments: ArraySlice<Expr>, _ context: inout Environment) throws -> Expr {
+        return arguments.first! // quote must not eval rest
+    }
+
+    static func label(_ arguments: ArraySlice<Expr>, _ context: inout Environment) throws -> Expr {
+        guard
+            case .atom(let name) =  arguments.first,
+            let valueExpression =   arguments.dropFirst().first
+        else {
+            throw InterpretationError(message: "'label': argument mismatch")
+        }
+
+        let value = try valueExpression.eval(in: &context)
+        context[name.description] = value
+        return value
+    }
+
+    static func car(_ arguments: ArraySlice<Expr>) throws -> Expr {
+        guard case .list(let list) = arguments.first else {
+            throw InterpretationError(message: "'car' expects argument that is a list")
+        }
+        return list.first!
+    }
+
+    static func cdr(_ arguments: ArraySlice<Expr>) throws -> Expr {
+        guard case .list(let list) = arguments.first else {
+            throw InterpretationError(message: "'cdr' expects argument that is a list")
+        }
+        return .list(list.dropFirst())
+    }
+
+    static func cons(_ arguments: ArraySlice<Expr>) throws -> Expr {
+        guard
+            let element = arguments.first,
+            case .list(let list) = arguments.dropFirst().first
+        else {
+            throw InterpretationError(message: "'cons': argument mismatch")
+        }
+        return .list([element] + list)
+    }
 }
 
 protocol Lisp {
@@ -104,61 +145,21 @@ extension Lisp {
     }
 }
 
-extension Lisp {
-    mutating func installSpecialForms() {
-        let specialForms: [String: Expr<AtomType>.Function] = [
-            "quote": .specialForm { arguments, _ in
-                return arguments.first! // quote must not eval rest
-            },
-            "label": .specialForm { arguments, context in
-                guard
-                    case .atom(let name) =  arguments.first,
-                    let valueExpression =   arguments.dropFirst().first
-                else {
-                    throw InterpretationError(message: "'label': argument mismatch")
-                }
-
-                let value = try valueExpression.eval(in: &context)
-                context[name.description] = value
-                return value
-            }
-        ]
-        environment.merge(specialForms.mapValues { Expr<AtomType>.function($0) }) { a, b in a }
-    }
-
-    mutating func installBuiltIns() {
-        let builtIns: [String: Expr<AtomType>.Function] = [
-            "car": .builtIn { args in
-                guard case .list(let list) = args.first else {
-                    throw InterpretationError(message: "'car' expects argument that is a list")
-                }
-                return list.first!
-            },
-            "cdr": .builtIn { args in
-                guard case .list(let list) = args.first else {
-                    throw InterpretationError(message: "'cdr' expects argument that is a list")
-                }
-                return .list(list.dropFirst())
-            },
-            "cons": .builtIn { args in
-                guard
-                    let element = args.first,
-                    case .list(let list) = args.dropFirst().first
-                else {
-                    throw InterpretationError(message: "'cons': argument mismatch")
-                }
-                return .list([element] + list)
-            },
-        ]
-        environment.merge(builtIns.mapValues { Expr<AtomType>.function($0) }) { a, b in a }
-    }
-}
-
 struct LispMinimal: Lisp {
     var environment: Expr<String>.Environment = [:]
 
+    static func basicEnvironment<AtomType>() -> Expr<AtomType>.Environment {
+        let environment: Expr<AtomType>.Environment = [
+            "quote": .function(.specialForm(Expr.quote(_:_:))),
+            "label": .function(.specialForm(Expr.label(_:_:))),
+            "car": .function(.builtIn(Expr.car(_:))),
+            "cdr": .function(.builtIn(Expr.cdr(_:))),
+            "cons": .function(.builtIn(Expr.cons(_:))),
+        ]
+        return environment
+    }
+
     init() {
-        installSpecialForms()
-        installBuiltIns()
+        environment = Self.basicEnvironment()
     }
 }
