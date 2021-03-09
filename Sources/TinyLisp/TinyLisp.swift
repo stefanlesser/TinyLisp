@@ -38,8 +38,8 @@ struct InterpretationError: Error {
 }
 
 extension Expr {
-    private func apply(_ function: Expr, _ arguments: ArraySlice<Expr>, _ context: inout Environment) throws -> Expr {
-        switch function {
+    private func apply(_ arguments: ArraySlice<Expr>, _ context: inout Environment) throws -> Expr {
+        switch self {
         case .function(let function): // apply function
             switch function {
             case .specialForm(let specialForm):
@@ -62,7 +62,7 @@ extension Expr {
             return self
         case .list(let list):
             let function = try list.first!.eval(in: &context)
-            return try apply(function, list.dropFirst(), &context)
+            return try function.apply(list.dropFirst(), &context)
         case .atom(let atom): // lookup symbol or pass atom back unchanged
             return context[atom.description] ?? self
         }
